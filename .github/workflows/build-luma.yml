@@ -1,0 +1,40 @@
+name: Build Luma.prx
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm cmake ninja-build binutils libicu-dev
+      - name: Download OpenOrbis toolchain
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$HOME/oo" /tmp/oo
+          gh release download --repo OpenOrbis/OpenOrbis-PS4-Toolchain --pattern '*.tar.gz' --dir /tmp/oo
+          tar -xzf /tmp/oo/*.tar.gz -C "$HOME/oo"
+          ROOT=$(dirname "$(find "$HOME/oo" -maxdepth 3 -type d -name lib | head -1)")
+          echo "toolchain root: $ROOT"
+          chmod +x "$ROOT"/bin/linux/* || true
+          echo "OO_PS4_TOOLCHAIN=$ROOT" >> "$GITHUB_ENV"
+      - name: Build and install the GoldHEN Plugin SDK
+        run: |
+          git clone --depth 1 https://github.com/GoldHEN/GoldHEN_Plugins_SDK /tmp/ghsdk
+          cd /tmp/ghsdk
+          make install
+          cp build/crtprx.o "$OO_PS4_TOOLCHAIN/lib/"
+          ls -la "$OO_PS4_TOOLCHAIN/lib/crtprx.o" "$OO_PS4_TOOLCHAIN/lib/libGoldHEN_Hook.a"
+          ls "$OO_PS4_TOOLCHAIN/include/GoldHEN"
+      - name: Build Luma
+        run: bash ./build.sh
+      - name: Upload plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: Luma-prx
+          path: |
+            build/Luma.prx
+            build/Luma.elf
