@@ -1,0 +1,52 @@
+name: Build Madoka.sprx
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Embed natives and Madoka menu
+        run: |
+          test -f scripts/gta5/natives.lua || { echo "missing scripts/gta5/natives.lua"; exit 1; }
+          test -f scripts/gta5/madoka_menu.lua || { echo "missing scripts/gta5/madoka_menu.lua"; exit 1; }
+          python3 - <<'PY'
+          def arr(name, path):
+              d = open(path, 'rb').read()
+              body = ",".join(str(b) for b in d) + ",0"
+              return "static const unsigned char %s[] = {%s};\n" % (name, body)
+          out = "#pragma once\n"
+          out += arr("MADOKA_NATIVES", "scripts/gta5/natives.lua")
+          out += arr("MADOKA_MENU", "scripts/gta5/madoka_menu.lua")
+          open("src/script/embedded_madoka.h", "w").write(out)
+          PY
+          ls -la src/script/embedded_madoka.h
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm cmake ninja-build binutils libicu-dev
+      - name: Download OpenOrbis toolchain
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$HOME/oo" /tmp/oo
+          gh release download --repo OpenOrbis/OpenOrbis-PS4-Toolchain --pattern '*.tar.gz' --dir /tmp/oo
+          tar -xzf /tmp/oo/*.tar.gz -C "$HOME/oo"
+          ROOT=$(dirname "$(find "$HOME/oo" -maxdepth 3 -type d -name lib | head -1)")
+          chmod +x "$ROOT"/bin/linux/* || true
+          echo "OO_PS4_TOOLCHAIN=$ROOT" >> "$GITHUB_ENV"
+      - name: Build and install the GoldHEN Plugin SDK
+        run: |
+          git clone --depth 1 https://github.com/GoldHEN/GoldHEN_Plugins_SDK /tmp/ghsdk
+          cd /tmp/ghsdk
+          make install
+          cp build/crtprx.o "$OO_PS4_TOOLCHAIN/lib/"
+      - name: Build
+        run: |
+          bash ./build.sh
+          cp build/Luma.prx build/Madoka.sprx
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: Madoka-sprx
+          path: build/Madoka.sprx
